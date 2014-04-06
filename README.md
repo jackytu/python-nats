@@ -17,17 +17,32 @@ python setup install
 ## Basic Usage
 
 ```python
+import time
 from nats.client import NatsClient
 
-def callback_sub(msg, reply):
-    nats.publish(reply, "reply for this")
-    print  "received {}".format(msg)
-def callback_pub():
-    print "publish msg"
+nats = NatsClient()
+conn, error  = nats.connect_nats({
+    "uri" : NATS_URI })
 
-sid = nats.subscribe("python-nats", {}, callback_sub)
-nats.publish("python-nats", "hello-world", "", callback_pub)
-nats.request("python-nats", "hello-world", {}, callback_pub)
+if error: sys.exit(-1)
+
+time.sleep(1)
+
+def request_cb(msg, reply):
+    print  "received {}".format(msg)
+    nats.publish(reply, "I can help!")
+
+def subscribe_cb(msg):
+    print "received {}".format(msg)
+
+def publish_cb():
+    print "published one message"
+
+sid = nats.subscribe("help", {}, request_cb)
+nats.publish("help", "who can help", "", publish_cb)
+nats.request("help", "who can help", {}, subscribe_cb)
+time.sleep(1)
+nats.unsubscribe(sid)
 
 ```
 
