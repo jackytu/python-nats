@@ -3,8 +3,6 @@ import os,sys
 import unittest
 import tempfile
 import shutil
-sys.path.insert(0, "/Users/tuzhongying/Tools/homebrew/bin")
-sys.path.append("/Users/tuzhongying/Tools/homebrew/lib/python2.7/site-packages")
 
 LIB_PATH = os.path.split(os.getcwd())[0]
 sys.path.append(LIB_PATH)

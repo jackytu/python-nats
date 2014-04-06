@@ -520,3 +520,7 @@ class NatsClient():
         self.publish(subject, data, inbox)
         return s
 
+    def __str__(self):
+        return "python-nats-{}".format(VERSION)
+
+

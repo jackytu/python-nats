@@ -1,6 +1,7 @@
 import re
 
 VERSION = "1.0.0.beta.1"
+
 DEFAULT_PORT = "4222"
 DEFAULT_URI = "nats://127.0.0.1" + ":" + DEFAULT_PORT
 
