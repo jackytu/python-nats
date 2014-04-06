@@ -4,6 +4,7 @@ from nats.client import NatsClient
 
 NATS_URI = "nats://n_user:n_passwd@10.36.166.46:8446"
 
+
 def main():
     nats = NatsClient()
     conn, error  = nats.connect_nats({
