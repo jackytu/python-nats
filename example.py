@@ -1,5 +1,4 @@
 import sys, time
-sys.path.append("/Users/tuzhongying/Tools/homebrew/lib/python2.7/site-packages")
 from nats.client import NatsClient
 
 NATS_URI = "nats://nats:nats@127.0.0.1:4242"
