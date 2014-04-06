@@ -10,7 +10,7 @@ fi
 echo "Using NATS version $NATS_VERSION"
 
 git clone https://github.com/derekcollison/nats.git
-cd etcd
+cd nats
 git checkout $NATS_VERSION
 
 ${TRAVIS:?"This is not a Travis build. All Done"}
