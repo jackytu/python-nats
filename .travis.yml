@@ -1,4 +1,7 @@
 languate: python
+python:
   - 2.7.6
+  - 2.7.2
 
 script: "echo"
+install: "python setup.py install"
