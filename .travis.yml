@@ -1,4 +1,4 @@
 languate: python
   - 2.7.6
 
-script: "not implented yet"
+script: "echo"
