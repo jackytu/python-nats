@@ -3,7 +3,13 @@ python:
   - 2.7.6
   - 2.7.2
 
+before_install:
+  - ./buildnats.sh
+
+install:
+  - pip install -r requirement.txt
 
 script:
   - python -m test.test_unit
+
 
