@@ -119,19 +119,15 @@ class NatsClient():
         """
         if type(addr) is not str: 
             raise NotImplementedError
-        try:    
-            protocol, s1 = urllib.splittype(addr)
-            if not protocol == "nats": 
-                raise NatsException("Invalid uri")
-            auth, s2 = urllib.splituser(s1)
-            u, pswd = urllib.splitpasswd(auth)
-            user = u.lstrip("/")
-            host_with_port, s3 = urllib.splithost(s2)
-            host, port = urllib.splitport(s3)
-        except NatsException, e:
-            user, pswd, host, port = "nats", "nats", "127.0.0.1", "4001"
-        except:
-            user, pswd, host, port = "nats", "nats", "127.0.0.1", "4001"
+        protocol, s1 = urllib.splittype(addr)
+        if not protocol == "nats": 
+            raise NatsException("Invalid uri")
+        auth, s2 = urllib.splituser(s1)
+        u, pswd = urllib.splitpasswd(auth)
+        user = u.lstrip("/")
+        host_with_port, s3 = urllib.splithost(s2)
+        host, port = urllib.splitport(s3)
+
         return user, pswd, host, int(port)
 
     def _flush_pending(self):
