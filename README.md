@@ -7,12 +7,15 @@ A python client for the [NATS messaging system](https://github.com/derekcollison
 ```bash
 # Python Client
 git clone https://github.com/jackytu/python-nats
+cd python-nats
+python setup install
+
 ```
 
 ## Basic Usage
 
 ```python
-from client import NatsClient
+from nats.client import NatsClient
 
 def callback_sub(msg, reply):
     nats.publish(reply, "reply for this")
