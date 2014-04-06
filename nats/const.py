@@ -19,7 +19,8 @@ DEFAULT_PING_MAX = 2
 
 # Protocol
 # self.private
-MSG      = re.compile("\AMSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n", re.IGNORECASE) #:nodoc:
+#MSG      = re.compile("\AMSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n", re.IGNORECASE) #:nodoc:
+MSG      = re.compile("\AMSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n", re.IGNORECASE)
 OK       = re.compile("\A\+OK\s*\r\n", re.IGNORECASE) #:nodoc:
 ERR      = re.compile("\A-ERR\s+('.+')?\r\n", re.IGNORECASE) #:nodoc:
 PING     = re.compile("\APING\s*\r\n", re.IGNORECASE) #:nodoc:

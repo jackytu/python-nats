@@ -6,7 +6,8 @@ class UriInvalidException(Exception):
 class NatsException(Exception):
     def __init__(self, desc):
         self.description = "[{}] {}".format(str(self.__class__).split('.')[1], desc)
-
+        
+class NatsParseDataException(NatsException): pass
 class NatsServerException(NatsException): pass
 class NatsClientException(NatsException): pass
 class NatsConnectException(NatsException): pass

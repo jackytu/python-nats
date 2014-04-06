@@ -55,6 +55,8 @@ class NatsClient():
         for (k, v) in self._DEFAULT_CLIENT_ATTR.items():
             setattr(self, k, v)
 
+        print self.__str__()
+
     def _connect_server(self, host, port):
         """
         connect to nats server;
@@ -127,7 +129,6 @@ class NatsClient():
         user = u.lstrip("/")
         host_with_port, s3 = urllib.splithost(s2)
         host, port = urllib.splitport(s3)
-
         return user, pswd, host, int(port)
 
     def _flush_pending(self):
@@ -136,6 +137,7 @@ class NatsClient():
         if not self.pending: return None 
         try: 
             self.sock.sendall("".join(self.pending))
+
         except Exception, e: 
             self._on_connection_lost(e.message)
 
@@ -158,6 +160,8 @@ class NatsClient():
         self.ping_timer = LoopingCall(self._send_ping)
         self.ping_timer.start(self.ping_interval)
 
+        print "connected to Nats <{}:{}>".format(self.host, self.port)
+
     def _on_connection_lost(self, reason):
         """
         action if connection losted, actions including:
@@ -166,24 +170,25 @@ class NatsClient():
         3. reconnect; (TODO）
         """
 
-        self.connected = False
+        self.connected = False        
         if self.data_receiver: self.data_receiver.join(1)
         if self.ping_timer: self.ping_timer.cancel()
-        raise NatsException("Connection losted.")
+        raise NatsException("Connection closed due to {}.".format(reason))
 
     def  _waiting_data(self):
         """
         waiting for data from nats server
         """
-
         while self.connected:
             try:
                 wait_read(self.sock.fileno())
                 data = self.sock.recv(1024)
-                self._process_data(data)
             except Exception, e:
                 self._on_connection_lost(e.message)
                 return
+
+            self._process_data(data)
+
 
     def _create_inbox(self):
         """
@@ -236,16 +241,18 @@ class NatsClient():
 
         self.msgs_received += 1
         if msg: self.bytes_received += len(msg)
+
         if sid not in self.subs: return None
         sub = self.subs[sid]
 
         #unsubscribe subscriber if received enough messages; 
         sub["received"] += 1
-        if sub["max"]:  
+        if "max" in sub:  
             if (sub["received"] > sub["max"]): return self.unsubscribe(sid) 
             if (sub["received"] == sub["max"]): del(self.subs[sid])
 
         callback  = sub["callback"]
+
         if callback:
             args, varargs, keywords, defaults = inspect.getargspec(callback)
             args_len = len(args)
@@ -260,14 +267,9 @@ class NatsClient():
 
         # cancel autounscribe timer, if subscriber request with timeout, 
         # and receive enough messages;
-        if (sub["timeout"] and sub["received"] >= sub["expected"]):
+        if ("timeout" in sub and sub["timeout"] and sub["received"] >= sub["expected"]):
              sub["timeout"].cancel()
-
-        def timer_proc():
-            if auto_unsubscribe: self.unsubscribe(sid) 
-            if callback: callback(sid) 
-
-        sub["timeout"] = Timer(timeout, timer_proc)
+             sub["timeout"] = None
 
         self.subs[sid] = sub
 
@@ -305,49 +307,56 @@ class NatsClient():
         self.pending_size += len(command)
         self._flush_pending()
 
-    def _process_data(self,data):
+    def _process_data(self, data):
         "process data received from nats server, disptch data to proper handles"
 
         if not data: return
+
         if not self.buf: 
             self.buf = data
         else:
             self.buf += data
+
         while (self.buf):
             if self.parse_state == AWAITING_CONTROL_LINE:
                     if MSG.match(self.buf):
-                        self.buf = re.split(MSG, self.buf)[2:]
-                        parse_list = MSG.findall(self.buf)
-                        self.sub, self.sid, self.reply, self.needed = parse_list[0], \
-                                    int(parse_list[1]), parse_list[3], int(parse_list[4])
+                        parse_list = re.findall(MSG, self.buf)[0]
+                        self.buf = re.split(MSG, self.buf)[-1]
+                        self.sub, self.sid, p, self.reply, self.needed = parse_list
+                        self.sid = int(self.sid)
+                        self.needed = int(self.needed)                        
                         self.parse_state = AWAITING_MSG_PAYLOAD
-                        
+
                     elif OK.match(self.buf): 
-                        self.buf = re.split(OK, self.buf)[2:]
+                        self.buf = re.split(OK, self.buf)[-1]
+                        
                     elif ERR.match(self.buf):
-                        self.buf = re.split(OK, self.buf)[2:]
+                        self.buf = re.split(ERR, self.buf)[-1]
                     elif PING.match(self.buf):
                         self.pings += 1
-                        self.buf =  "".join(re.split(OK, self.buf)[2:])
+                        self.buf =  re.split(PING, self.buf)[-1]
                         self._send_command(PONG_RESPONSE)
                     elif PONG.match(self.buf):
-                        self.buf =  ''.join(re.split(OK, self.buf)[2:])
+                        self.buf =  re.split(PONG, self.buf)[-1]
                         cb = self.pongs.get()
                         if cb: cb()
                     elif INFO.match(self.buf):
-                        parse_list = INFO.findall(self.buf)
-                        self.buf =  "".join(re.split(OK, self.buf)[2:])
-                        self._process_info(parse_list[0])
+                        parse_list = re.findall(INFO, self.buf)[0]
+                        self.buf =  re.split(INFO, self.buf)[-1]
+                        self._process_info(parse_list)
                     elif UNKNOWN.match(self.buf):
-                        self.buf =  re.split(OK, self.buf)[2:]
-                        print "Unknwn protocol"
+                        self.buf =  re.split(OK, self.buf)[-1]
+                        raise NatsException("Unknown protocol")
                     else:
                         return None
+
                     if (self.buf and len(self.buf) == 0 ) : self.buf = []
             if self.parse_state == AWAITING_MSG_PAYLOAD:
                     if not (self.needed and len(self.buf) >= (self.needed + CR_LF_SIZE)): 
                         return None 
-                    self._on_messsage(self.sub, self.sid, self.buf[0:self.needed], self.reply)
+
+                    self._on_messsage(self.sub, self.sid, self.buf[ 0 : self.needed ], self.reply)
+
                     self.buf = self.buf[(self.needed + CR_LF_SIZE):len(self.buf)]
                     self.sub = self.sid = self.reply = self.needed = None
                     self.parse_state = AWAITING_CONTROL_LINE
@@ -392,6 +401,7 @@ class NatsClient():
         blk: closure called when publish has been processed by the server.     
 
         """
+        if not self.connected : raise NatsClientException("Connection losted")
         if not subject: return None
         msg = str(msg)
         self.msgs_sent += 1
@@ -420,27 +430,22 @@ class NatsClient():
         Returns subscription id which can be passed to #unsubscribe.
         """
 
+        if not self.connected : raise NatsClientException("Connection losted")
         if not subject: return None
         self.ssid += 1
         sid = self.ssid
         q = ""
-
         sub = { "subject" : subject, "received" : 0 }
         sub["callback"] = callback
-
         if "queue" in opts: 
             q = sub["queue"] = opts["queue"]
- 
         if "max" in opts: sub["max"] = opts["max"] 
-
         self._send_command("SUB {} {} {}{}".format(subject, q, 
                                                                        sid, CR_LF))
         self.subs[sid] = sub
-
         # Setup server support for auto-unsubscribe
         if "max" in opts: self.unsubscribe(sid, opts["max"])
         return sid
-
 
     def unsubscribe(self, sid, opt_max=None):
         """
@@ -451,6 +456,7 @@ class NatsClient():
         sid: Subject Identifier
         opt_max: optional number of responses to receive before auto-unsubscribing.      
         """
+        if not self.connected : raise NatsClientException("Connection losted")
         opt_max_str = ""
         if opt_max: opt_max_str = " " + str(opt_max)
         self._send_command("UNSUB {}{}{}".format(sid, opt_max_str, CR_LF))
@@ -470,7 +476,7 @@ class NatsClient():
         timeout: integer in seconds
         opts: options, :auto_unsubscribe(true), :expected(1)
         """
-
+        if not self.connected : raise NatsClientException("Connection losted")
         if not sid in self.subs: return None
         sub = self.subs[sid]
         auto_unsubscribe, expected = True, 1
@@ -486,6 +492,7 @@ class NatsClient():
             if callback: callback(sid)
 
         sub["timeout"] = Timer(timeout, pblock)
+        sub["timeout"].start()
         sub["expected"] = expected
         self.subs[sid] = sub
 
@@ -503,7 +510,7 @@ class NatsClient():
         =====
         sid: Subject Identifier
         """
-
+        if not self.connected : raise NatsClientException("Connection losted")
         if not subject: return None
         inbox = self._create_inbox()
         def process_reply(msg, reply):
