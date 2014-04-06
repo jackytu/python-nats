@@ -1,6 +1,7 @@
 language: python
+
 python:
-  - 2.7.6
+  - "2.7.6"
 
 before_install:
   - ./buildnats.sh
@@ -10,5 +11,3 @@ install:
 
 script:
   - python -m test.test_unit
-
-
