@@ -6,6 +6,9 @@ python:
 before_install:
   - ./buildnats.sh
 
+install:
+  - pip install -r requirement.txt
+
 script:
   - python -m test.test_unit
 
