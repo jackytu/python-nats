@@ -9,17 +9,16 @@ import random
 import inspect
 import time
 import copy
-from gevent.socket import socket, wait_read, wait_write
-from urlparse import urlparse
 from const import *
 from error import *
 import threading 
 import gevent
+from urlparse import urlparse
+from  threading import Timer
 from gevent.queue import  Queue
 from gevent.event import AsyncResult
-from  threading import Timer
-#from conn import NatsConnection
 from twisted.internet.task import LoopingCall
+from gevent.socket import socket, wait_read, wait_write
 
 class NatsClient():
     """Once connected, send a message, then print the result."""
@@ -60,6 +59,7 @@ class NatsClient():
     def __init__(self, opts = {}):
         for (k, v) in self._DEFAULT_CLIENT_ATTR.items():
             setattr(self, k, v)
+        print str(self.__class__)
 
     def connect_nats(self, opts = {}):
         for (k, v) in self._DEFAULT_CONN_OPTS.items():
@@ -70,13 +70,13 @@ class NatsClient():
         self.options["user"], self.options["pass"], self.host, self.port = \
                                              self._server_host_port(opts["uri"])
         print self.options
-        print "hehe in connect_nats"
         self.client, error = self._connect_server(self.host, self.port)
         return self.client, error
 
     def _connect_server(self, host, port):
         try:
             self.sock = socket()
+            #self.sock.settimeout(3)
             client = self.sock.connect((host, port))
             self._on_connection_complete()
             return client, None
@@ -130,6 +130,7 @@ class NatsClient():
         self.connected = False
         if self.data_receiver: self.data_receiver.join(1)
         if self.ping_timer: self.ping_timer.cancel()
+        raise NatsException("Connection losted.")
 
     def  _waiting_data(self):
         while self.connected:
@@ -382,9 +383,10 @@ class NatsClient():
 def main():
     nats = NatsClient()
     conn, error  = nats.connect_nats({
-        "uri" : "nats://nats:nats@127.0.0.1:4242"}
+        "uri" : "nats://n_user:n_passwd@10.36.166.46:8446"}
     )
-    i = 2
+    print error
+    i = 200
     while i>1:
         time.sleep(1)
         i -= 1

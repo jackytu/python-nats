@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/jackytu/python-nats.png)](https://travis-ci.org/jackytu/python-nats)
+
 # NATS - Python Client
 
 A python client for the [NATS messaging system](https://github.com/derekcollison/nats).
