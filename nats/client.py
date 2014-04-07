@@ -1,18 +1,28 @@
-#!/usr/bin/env python
 # -*- coding: iso-8859-1 -*-
 import os, sys
 import json, urllib, random
-import inspect, time, copy
+import inspect, time, weakref
 import threading, gevent, urlparse
 from gevent.socket import ( 
-             socket, wait_read, wait_write)
+                         socket, wait_read)
 
 from const import *
 from error import *
 from threading import Timer
+from functools import partial
 from gevent.queue import  Queue
 from gevent.event import AsyncResult
 from twisted.internet.task import LoopingCall
+
+class lazyattribute(object):
+    def __init__(self, f):
+        self.data = weakref.WeakKeyDictionary()
+        self.f = f
+
+    def __get__(self, obj, cls):
+        if obj not in self.data:
+            self.data[obj] = self.f(obj)
+        return self.data[obj]
 
 class NatsClient():
     #default nats client attributes
@@ -29,17 +39,14 @@ class NatsClient():
        "pending" : [],
        "pings" : 0,
        "pongs" : 0,
-       "ping_timer" : None,
        "pings_outstanding" : 0,
        "pongs_received" : 0, 
        "ping_interval" : DEFAULT_PING_INTERVAL,
        "max_outstanding_pings" : DEFAULT_PING_MAX,
        "pending_size" : 0,
        "parse_state" : AWAITING_CONTROL_LINE,
-       "buf" : None,
        "sock" : None,
        "cient" : None,
-       "data_receiver" : None
     }
 
     #default nats connection options.
@@ -54,7 +61,6 @@ class NatsClient():
     def __init__(self):
         for (k, v) in self._DEFAULT_CLIENT_ATTR.items():
             setattr(self, k, v)
-
         print self.__str__()
 
     def _connect_server(self, host, port):
@@ -85,23 +91,17 @@ class NatsClient():
         except Exception, e:
             return None, "{}".format(e.message)
 
-    def _setup_data_receiver(self):
-        """
-        setup daemon thread waiting for data from nats server.
+    @lazyattribute
+    def ping_timer(self):  return LoopingCall(self._send_ping)
 
-        Params:
-        =====
-        None
-
-        Returns:
-        =====
-        t: daemon thread
-
-        """
-
+    @lazyattribute
+    def data_receiver(self): 
         t = threading.Thread(target=self._waiting_data)
         t.setDaemon(True)
-        return t
+        return t      
+
+    @lazyattribute
+    def buf(self): return None
 
     def _server_host_port(self, addr = DEFAULT_URI):
         """
@@ -134,14 +134,13 @@ class NatsClient():
     def _flush_pending(self):
         "flush pending data of current connection."
 
-        if not self.pending: return None 
+        if not self.pending: return
         try: 
             self.sock.sendall("".join(self.pending))
+            self.pending, self.pending_size = None, 0
 
         except Exception, e: 
             self._on_connection_lost(e.message)
-
-        self.pending, self.pending_size = None, 0
 
     def _on_connected(self):
         """
@@ -154,13 +153,13 @@ class NatsClient():
         self.pings_outstanding = 0
         self.pongs_received = 0
 
-        self.data_receiver =  self._setup_data_receiver()
+        #self.data_receiver =  self._setup_data_receiver()
         self.data_receiver.start()
 
-        self.ping_timer = LoopingCall(self._send_ping)
+        #self.ping_timer = LoopingCall(self._send_ping)
         self.ping_timer.start(self.ping_interval)
 
-        print "connected to Nats <{}:{}>".format(self.host, self.port)
+        print "Connected to Nats <{}:{}>".format(self.host, self.port)
 
     def _on_connection_lost(self, reason):
         """
@@ -169,7 +168,6 @@ class NatsClient():
         2. cancel ping timer; (@2014-04-06)
         3. reconnect; (TODO）
         """
-
         self.connected = False        
         if self.data_receiver: self.data_receiver.join(1)
         if self.ping_timer: self.ping_timer.cancel()
@@ -186,9 +184,7 @@ class NatsClient():
             except Exception, e:
                 self._on_connection_lost(e.message)
                 return
-
             self._process_data(data)
-
 
     def _create_inbox(self):
         """
@@ -210,7 +206,7 @@ class NatsClient():
     def _queue_server_rt(self, cb):
         "handshake with nats server by ping-pong"
 
-        if not cb: return None
+        if not cb: return
         if not self.pongs: self.pongs = Queue()
         self.pongs.put(cb)
         self._send_command(PING_REQUEST)
@@ -220,11 +216,6 @@ class NatsClient():
 
         self.pongs_received += 1
         self.pings_outstanding -= 1
-
-    def _connect_command(self):
-        "connect protocol"
-
-        return "CONNECT {}{}".format(json.dumps(self.options), CR_LF)
 
     def _on_messsage(self, subject, sid, msg, reply = None):
         """
@@ -236,13 +227,11 @@ class NatsClient():
         sid: subscriber id;
         reply: inbox name if exists
         msg: message body
-
         """
-
         self.msgs_received += 1
         if msg: self.bytes_received += len(msg)
 
-        if sid not in self.subs: return None
+        if sid not in self.subs: return
         sub = self.subs[sid]
 
         #unsubscribe subscriber if received enough messages; 
@@ -280,17 +269,18 @@ class NatsClient():
         Params:
         =====
         info: nats server information 
-
         """
         self.server_info = json.loads(info)
         if self.server_info["auth_required"]:
             self._send_connect_command()
-
+    
     def _send_connect_command(self):
         "send connect command to nats server"
 
-        self._send_command(self._connect_command(), True)
-
+        connect_command = "CONNECT {}{}".format(
+                             json.dumps(self.options), CR_LF)
+        self._send_command(connect_command, True)
+    
     def _send_command(self, command, priority = False):
         """
         send command to nats server;
@@ -311,57 +301,49 @@ class NatsClient():
         "process data received from nats server, disptch data to proper handles"
 
         if not data: return
+        self.buf = data if not self.buf else self.buf + data
 
-        if not self.buf: 
-            self.buf = data
-        else:
-            self.buf += data
+        after_parse = lambda tittle, msg : re.split(tittle, msg)[-1]
+        matched = lambda tittle, msg: re.findall(tittle, msg)[0]
 
         while (self.buf):
             if self.parse_state == AWAITING_CONTROL_LINE:
                     if MSG.match(self.buf):
-                        parse_list = re.findall(MSG, self.buf)[0]
-                        self.buf = re.split(MSG, self.buf)[-1]
-                        self.sub, self.sid, p, self.reply, self.needed = parse_list
+                        self.sub, self.sid, p, self.reply, self.needed = matched(MSG, self.buf)
+                        self.buf = after_parse(MSG, self.buf)
                         self.sid = int(self.sid)
                         self.needed = int(self.needed)                        
                         self.parse_state = AWAITING_MSG_PAYLOAD
-
                     elif OK.match(self.buf): 
-                        self.buf = re.split(OK, self.buf)[-1]
-                        
+                        self.buf = after_parse(OK, self.buf)
                     elif ERR.match(self.buf):
-                        self.buf = re.split(ERR, self.buf)[-1]
+                        self.buf = after_parse(ERR, self.buf)
                     elif PING.match(self.buf):
                         self.pings += 1
-                        self.buf =  re.split(PING, self.buf)[-1]
+                        self.buf = after_parse(PING, self.buf)
                         self._send_command(PONG_RESPONSE)
                     elif PONG.match(self.buf):
-                        self.buf =  re.split(PONG, self.buf)[-1]
+                        self.buf = after_parse(PONG, self.buf)
                         cb = self.pongs.get()
                         if cb: cb()
                     elif INFO.match(self.buf):
-                        parse_list = re.findall(INFO, self.buf)[0]
-                        self.buf =  re.split(INFO, self.buf)[-1]
-                        self._process_info(parse_list)
+                        self._process_info(matched(INFO, self.buf))
+                        self.buf = after_parse(INFO, self.buf)
                     elif UNKNOWN.match(self.buf):
-                        self.buf =  re.split(OK, self.buf)[-1]
+                        self.buf = after_parse(OK, self.buf)
                         raise NatsException("Unknown protocol")
                     else:
                         return None
-
-                    if (self.buf and len(self.buf) == 0 ) : self.buf = []
+                    if (self.buf and len(self.buf) == 0 ) : self.buf = None
             if self.parse_state == AWAITING_MSG_PAYLOAD:
                     if not (self.needed and len(self.buf) >= (self.needed + CR_LF_SIZE)): 
                         return None 
-
                     self._on_messsage(self.sub, self.sid, self.buf[ 0 : self.needed ], self.reply)
 
-                    self.buf = self.buf[(self.needed + CR_LF_SIZE):len(self.buf)]
+                    self.buf = self.buf[(self.needed + CR_LF_SIZE) : len(self.buf)]
                     self.sub = self.sid = self.reply = self.needed = None
                     self.parse_state = AWAITING_CONTROL_LINE
                     if (self.buf and len(self.buf) ==0 ): self.buf = None
-
 
     def connect_nats(self, opts = {}):
         """
@@ -376,14 +358,15 @@ class NatsClient():
         client: nats connection;
         error: error description if exists any;
         """
+        self.options = dict(zip(self._DEFAULT_CONN_OPTS.keys(), 
+                                    map(lambda x : opts[x] if x in opts else self._DEFAULT_CONN_OPTS[x],  
+                                            self._DEFAULT_CONN_OPTS.keys())
+                                         )
+        )
 
-        for (k, v) in self._DEFAULT_CONN_OPTS.items():
-            if k not in opts:
-                self.options[k] = v
-            else:
-                self.options[k] = opts[k]
         self.options["user"], self.options["pass"], self.host, self.port = \
                                              self._server_host_port(opts["uri"])
+
         self.client, error = self._connect_server(self.host, self.port)
         return self.client, error
 
