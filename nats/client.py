@@ -8,217 +8,41 @@ from gevent.socket import (
 
 from const import *
 from error import *
+from nats.stat import Stat
+from nats.common import Common
+from nats.heartbeat import Heartbeat
+from nats.connector import Connector
+from nats.protocol import Protocol
 from threading import Timer
-from functools import partial
 from gevent.queue import  Queue
-from gevent.event import AsyncResult
-from twisted.internet.task import LoopingCall
 
-class lazyattribute(object):
-    def __init__(self, f):
-        self.data = weakref.WeakKeyDictionary()
-        self.f = f
+class NatsClient(object):
+    'nats client'
 
-    def __get__(self, obj, cls):
-        if obj not in self.data:
-            self.data[obj] = self.f(obj)
-        return self.data[obj]
+    def __init__(self, **argvs):
+        self.subs = {}
+        self.buf = None
+        self.parse_state = Common.AWAITING_CONTROL_LINE
+        self.stat = Stat()
+        self.conn = Connector(callback=self.process_data, **argvs)
 
-class NatsClient():
-    #default nats client attributes
-    _DEFAULT_CLIENT_ATTR = {
-       "ssid" : 1,
-       "subs" : {},
-       "options" : {},
-       "connected" : False,
-       "msgs_received" : 0,
-       "msgs_sent" : 0,
-       "bytes_received" : 0,
-       "bytes_sent" : 0,
-       "needed" : 0,
-       "pending" : [],
-       "pings" : 0,
-       "pongs" : 0,
-       "pings_outstanding" : 0,
-       "pongs_received" : 0, 
-       "ping_interval" : DEFAULT_PING_INTERVAL,
-       "max_outstanding_pings" : DEFAULT_PING_MAX,
-       "pending_size" : 0,
-       "parse_state" : AWAITING_CONTROL_LINE,
-       "sock" : None,
-       "cient" : None,
-    }
+        print self.conn
+        self.ping_timer = Heartbeat(self.conn)
 
-    #default nats connection options.
-    _DEFAULT_CONN_OPTS = {
-        "user": "nats",
-        "pass": "nats",
-        "verbose" : True,
-        "pedantic" : True,
-        "ssl_required" : False
-    }
+        print self.__str__()  
 
-    def __init__(self):
-        for (k, v) in self._DEFAULT_CLIENT_ATTR.items():
-            setattr(self, k, v)
-        print self.__str__()
+    def start(self):
+        'start nats client'
+        self.conn.open()
+        self.ping_timer.start()
 
-    def _connect_server(self, host, port):
-        """
-        connect to nats server;
+    def stop(self):
+        'start nats client'
+        self.conn.close()
+        self.ping_timer.cancel()
 
-        Params:
-        =====
-        host: nats server ip address;
-        port: nats server listen port;
-
-        Returns:
-        =====
-        client: nats connection;
-        error: error destription if exists;
-        """
-        try:
-            """Use default gevent socket paramters : 
-            family = AF_INET
-            type = SOCKE_STREAM
-            protocol = auto detect
-            """
-            self.sock = socket()
-            self.sock.settimeout(3)
-            client = self.sock.connect((host, port))
-            self._on_connected()
-            return client, None
-        except Exception, e:
-            return None, "{}".format(e.message)
-
-    @lazyattribute
-    def ping_timer(self):  return LoopingCall(self._send_ping)
-
-    @lazyattribute
-    def data_receiver(self): 
-        t = threading.Thread(target=self._waiting_data)
-        t.setDaemon(True)
-        return t      
-
-    @lazyattribute
-    def buf(self): return None
-
-    def _server_host_port(self, addr = DEFAULT_URI):
-        """
-        parse the metadata nats server uri;
-
-        Params:
-        =====
-        addr: nats server address, use "nats://127.0.0.1:4242" if not given;
-
-        Returns:
-        =====
-        user: username to login nats server;
-        pswd: password to login nats server;
-        host: ip address of nats server;
-        port: port of nats server
-
-        """
-        if type(addr) is not str: 
-            raise NotImplementedError
-        protocol, s1 = urllib.splittype(addr)
-        if not protocol == "nats": 
-            raise NatsException("Invalid uri")
-        auth, s2 = urllib.splituser(s1)
-        u, pswd = urllib.splitpasswd(auth)
-        user = u.lstrip("/")
-        host_with_port, s3 = urllib.splithost(s2)
-        host, port = urllib.splitport(s3)
-        return user, pswd, host, int(port)
-
-    def _flush_pending(self):
-        "flush pending data of current connection."
-
-        if not self.pending: return
-        try: 
-            self.sock.sendall("".join(self.pending))
-            self.pending, self.pending_size = None, 0
-
-        except Exception, e: 
-            self._on_connection_lost(e.message)
-
-    def _on_connected(self):
-        """
-        actions when connect to nats server, actions as below:
-        1. setup a ping timer for detect the connectivity of connection;
-        2. setup a data receiver for listening the socket;
-        """
-
-        self.connected = True
-        self.pings_outstanding = 0
-        self.pongs_received = 0
-
-        #self.data_receiver =  self._setup_data_receiver()
-        self.data_receiver.start()
-
-        #self.ping_timer = LoopingCall(self._send_ping)
-        self.ping_timer.start(self.ping_interval)
-
-        print "Connected to Nats <{}:{}>".format(self.host, self.port)
-
-    def _on_connection_lost(self, reason):
-        """
-        action if connection losted, actions including:
-        1. cancel data receiver; (@2014-04-06)
-        2. cancel ping timer; (@2014-04-06)
-        3. reconnect; (TODO）
-        """
-        self.connected = False        
-        if self.data_receiver: self.data_receiver.join(1)
-        if self.ping_timer: self.ping_timer.cancel()
-        raise NatsException("Connection closed due to {}.".format(reason))
-
-    def  _waiting_data(self):
-        """
-        waiting for data from nats server
-        """
-        while self.connected:
-            try:
-                wait_read(self.sock.fileno())
-                data = self.sock.recv(1024)
-            except Exception, e:
-                self._on_connection_lost(e.message)
-                return
-            self._process_data(data)
-
-    def _create_inbox(self):
-        """
-        create a subject that can be used for "directed" communications.
-        Returns:
-        =====
-        inbox name;
-        """
-        inbox = ''.join(map(lambda xx:(hex(ord(xx))[2:]),os.urandom(16)))
-        return "_INBOX." + inbox
-
-    def _send_ping(self):
-        "send ping request to nats server"
-
-        self.pings_outstanding += 1
-        self._queue_server_rt(self._process_pong)
-        self._flush_pending()
-
-    def _queue_server_rt(self, cb):
-        "handshake with nats server by ping-pong"
-
-        if not cb: return
-        if not self.pongs: self.pongs = Queue()
-        self.pongs.put(cb)
-        self._send_command(PING_REQUEST)
-
-    def _process_pong(self):
-        "process pong response from nats server"
-
-        self.pongs_received += 1
-        self.pings_outstanding -= 1
-
-    def _on_messsage(self, subject, sid, msg, reply = None):
-        """
+    def _on_messsage(self, subject, sid, msg, reply=None):
+        '''\
         actions when received messages from nats server;
 
         Params:
@@ -227,23 +51,27 @@ class NatsClient():
         sid: subscriber id;
         reply: inbox name if exists
         msg: message body
-        """
-        self.msgs_received += 1
-        if msg: self.bytes_received += len(msg)
+        '''
+        self.stat.msgs_received += 1
+        if msg: 
+            self.stat.bytes_received += len(msg)
 
-        if sid not in self.subs: return
+        if sid not in self.subs: 
+            return
         sub = self.subs[sid]
 
         #unsubscribe subscriber if received enough messages; 
         sub["received"] += 1
         if "max" in sub:  
-            if (sub["received"] > sub["max"]): return self.unsubscribe(sid) 
-            if (sub["received"] == sub["max"]): del(self.subs[sid])
+            if sub["received"] > sub["max"]: 
+                return self.unsubscribe(sid) 
+            if sub["received"] == sub["max"]: 
+                del self.subs[sid]
 
-        callback  = sub["callback"]
+        callback = sub["callback"]
 
         if callback:
-            args, varargs, keywords, defaults = inspect.getargspec(callback)
+            args, _, _, _ = inspect.getargspec(callback)
             args_len = len(args)
             if args_len == 0: 
                 callback()
@@ -256,123 +84,31 @@ class NatsClient():
 
         # cancel autounscribe timer, if subscriber request with timeout, 
         # and receive enough messages;
-        if ("timeout" in sub and sub["timeout"] and sub["received"] >= sub["expected"]):
-             sub["timeout"].cancel()
-             sub["timeout"] = None
+        if "timeout" in sub  \
+                    and sub["timeout"] \
+                    and sub["received"] >= sub["expected"]:
+            sub["timeout"].cancel()
+            sub["timeout"] = None
 
         self.subs[sid] = sub
 
     def _process_info(self, info):
-        """
+        '''\
         process server infomation message;
         
         Params:
         =====
         info: nats server information 
-        """
-        self.server_info = json.loads(info)
-        if self.server_info["auth_required"]:
-            self._send_connect_command()
-    
-    def _send_connect_command(self):
-        "send connect command to nats server"
+        '''
+        server_info = json.loads(info)
+        print 'process info'
+        if server_info["auth_required"]:
+            conn_opts = self.conn.get_connection_options()
+            self.conn.send_command(Protocol.connect_command(conn_opts), 
+                True)
 
-        connect_command = "CONNECT {}{}".format(
-                             json.dumps(self.options), CR_LF)
-        self._send_command(connect_command, True)
-    
-    def _send_command(self, command, priority = False):
-        """
-        send command to nats server;
-        
-        Params:
-        =====
-        command: the command string;
-        priority: command priority;
-
-        """
-        if not self.pending : self.pending = []
-        if not priority: self.pending.append(command)
-        if priority: self.pending.insert(0, command) 
-        self.pending_size += len(command)
-        self._flush_pending()
-
-    def _process_data(self, data):
-        "process data received from nats server, disptch data to proper handles"
-
-        if not data: return
-        self.buf = data if not self.buf else self.buf + data
-
-        after_parse = lambda tittle, msg : re.split(tittle, msg)[-1]
-        matched = lambda tittle, msg: re.findall(tittle, msg)[0]
-
-        while (self.buf):
-            if self.parse_state == AWAITING_CONTROL_LINE:
-                    if MSG.match(self.buf):
-                        self.sub, self.sid, p, self.reply, self.needed = matched(MSG, self.buf)
-                        self.buf = after_parse(MSG, self.buf)
-                        self.sid = int(self.sid)
-                        self.needed = int(self.needed)                        
-                        self.parse_state = AWAITING_MSG_PAYLOAD
-                    elif OK.match(self.buf): 
-                        self.buf = after_parse(OK, self.buf)
-                    elif ERR.match(self.buf):
-                        self.buf = after_parse(ERR, self.buf)
-                    elif PING.match(self.buf):
-                        self.pings += 1
-                        self.buf = after_parse(PING, self.buf)
-                        self._send_command(PONG_RESPONSE)
-                    elif PONG.match(self.buf):
-                        self.buf = after_parse(PONG, self.buf)
-                        cb = self.pongs.get()
-                        if cb: cb()
-                    elif INFO.match(self.buf):
-                        self._process_info(matched(INFO, self.buf))
-                        self.buf = after_parse(INFO, self.buf)
-                    elif UNKNOWN.match(self.buf):
-                        self.buf = after_parse(OK, self.buf)
-                        raise NatsException("Unknown protocol")
-                    else:
-                        return None
-                    if (self.buf and len(self.buf) == 0 ) : self.buf = None
-            if self.parse_state == AWAITING_MSG_PAYLOAD:
-                    if not (self.needed and len(self.buf) >= (self.needed + CR_LF_SIZE)): 
-                        return None 
-                    self._on_messsage(self.sub, self.sid, self.buf[ 0 : self.needed ], self.reply)
-
-                    self.buf = self.buf[(self.needed + CR_LF_SIZE) : len(self.buf)]
-                    self.sub = self.sid = self.reply = self.needed = None
-                    self.parse_state = AWAITING_CONTROL_LINE
-                    if (self.buf and len(self.buf) ==0 ): self.buf = None
-
-    def connect_nats(self, opts = {}):
-        """
-        connect to nats server
-
-        Params: 
-        =====
-        opts: connect options;
-
-        Returns:
-        =====
-        client: nats connection;
-        error: error description if exists any;
-        """
-        self.options = dict(zip(self._DEFAULT_CONN_OPTS.keys(), 
-                                    map(lambda x : opts[x] if x in opts else self._DEFAULT_CONN_OPTS[x],  
-                                            self._DEFAULT_CONN_OPTS.keys())
-                                         )
-        )
-
-        self.options["user"], self.options["pass"], self.host, self.port = \
-                                             self._server_host_port(opts["uri"])
-
-        self.client, error = self._connect_server(self.host, self.port)
-        return self.client, error
-
-
-    def publish(self, subject, msg=EMPTY_MSG, opt_reply="", blk=None):
-        """
+    def publish(self, subject, msg=Protocol.EMPTY_MSG, opt_reply="", blk=None):
+        '''\
         Publish a message to a given subject, with optional reply subject and 
         completion block
 
@@ -383,19 +119,23 @@ class NatsClient():
         opt_reply: reply inbox if needs;
         blk: closure called when publish has been processed by the server.     
 
-        """
-        if not self.connected : raise NatsClientException("Connection losted")
-        if not subject: return None
+        '''
+        if not self.conn.connected: 
+            raise NatsClientException("Connection losted")
+        if not subject: 
+            return None
         msg = str(msg)
-        self.msgs_sent += 1
-        self.bytes_sent += len(msg)
 
-        self._send_command("PUB {} {} {}{}{}{}".format(subject, opt_reply, len(msg), 
-                                                                           CR_LF,  msg,  CR_LF))
-        if blk: self._queue_server_rt(blk)
+        self.stat.msgs_sent += 1
+        self.stat.bytes_sent += len(msg)
 
-    def subscribe(self, subject, opts={}, callback=None):
-        """
+        self.conn.send_command("PUB {} {} {}{}{}{}".format(subject, 
+            opt_reply, len(msg), Protocol.CR_LF, msg, Protocol.CR_LF))
+        if blk: 
+            self.ping_timer.queue_server_rt(blk)
+
+    def subscribe(self, subject, callback=None, **opts):
+        '''\
         Subscribe to a subject with optional wildcards.
         Messages will be delivered to the supplied callback.
         Callback can take any number of the supplied arguments as defined by the 
@@ -411,46 +151,56 @@ class NatsClient():
         =====
         sid: Subject Identifier
         Returns subscription id which can be passed to #unsubscribe.
-        """
+        '''
 
-        if not self.connected : raise NatsClientException("Connection losted")
-        if not subject: return None
-        self.ssid += 1
-        sid = self.ssid
-        q = ""
-        sub = { "subject" : subject, "received" : 0 }
+        print self.conn.connected
+
+        if not self.conn.connected: 
+            raise NatsClientException("Connection losted")
+        if not subject: 
+            return None
+        sid = Common.get_ssid()
+        queue_str = ""
+        sub = {"subject" : subject, "received" : 0}
         sub["callback"] = callback
         if "queue" in opts: 
-            q = sub["queue"] = opts["queue"]
-        if "max" in opts: sub["max"] = opts["max"] 
-        self._send_command("SUB {} {} {}{}".format(subject, q, 
-                                                                       sid, CR_LF))
+            queue_str = sub["queue"] = opts["queue"]
+        if "max" in opts: 
+            sub["max"] = opts["max"] 
+        self.conn.send_command("SUB {} {} {}{}".format(subject, queue_str, 
+            sid, Protocol.CR_LF))
         self.subs[sid] = sub
         # Setup server support for auto-unsubscribe
-        if "max" in opts: self.unsubscribe(sid, opts["max"])
+        if "max" in opts: 
+            self.unsubscribe(sid, opts["max"])
         return sid
 
     def unsubscribe(self, sid, opt_max=None):
-        """
+        '''\
         Cancel a subscription.
 
         Params:
         =====
         sid: Subject Identifier
-        opt_max: optional number of responses to receive before auto-unsubscribing.      
-        """
-        if not self.connected : raise NatsClientException("Connection losted")
+        opt_max: optional number of responses to receive 
+        before auto-unsubscribing.      
+        '''
+        if not self.conn.connected: 
+            raise NatsClientException("Connection losted")
         opt_max_str = ""
-        if opt_max: opt_max_str = " " + str(opt_max)
-        self._send_command("UNSUB {}{}{}".format(sid, opt_max_str, CR_LF))
-        if not sid in  self.subs: return None
+        if opt_max: 
+            opt_max_str = " " + str(opt_max)
+        self.conn.send_command("UNSUB {}{}{}".format(sid, 
+            opt_max_str, Protocol.CR_LF))
+        if not sid in  self.subs: 
+            return None
         sub = self.subs[sid]
         sub["max"] = opt_max
         if not (sub["max"] and (sub["received"] < sub["max"])): 
-            del(self.subs[sid]) 
+            del self.subs[sid]
 
-    def timeout(self, sid, timeout, opts={}, callback=None):
-        """
+    def timeout(self, sid, timeout, callback=None, **opts):
+        '''\
         Setup a timeout for receiving messages for the subscription.
 
         Params:
@@ -458,9 +208,11 @@ class NatsClient():
         sid: Subject Identifier
         timeout: integer in seconds
         opts: options, :auto_unsubscribe(true), :expected(1)
-        """
-        if not self.connected : raise NatsClientException("Connection losted")
-        if not sid in self.subs: return None
+        '''
+        if not self.conn.connected: 
+            raise NatsClientException("Connection losted")
+        if not sid in self.subs: 
+            return None
         sub = self.subs[sid]
         auto_unsubscribe, expected = True, 1
 
@@ -471,16 +223,19 @@ class NatsClient():
             expected = opts["expected"]
 
         def pblock():
-            if auto_unsubscribe: self.unsubscribe(sid)
-            if callback: callback(sid)
+            'closure block for timeout request'
+            if auto_unsubscribe: 
+                self.unsubscribe(sid)
+            if callback: 
+                callback(sid)
 
         sub["timeout"] = Timer(timeout, pblock)
         sub["timeout"].start()
         sub["expected"] = expected
         self.subs[sid] = sub
 
-    def request(self, subject, data=None, opts={}, cb=None):
-        """
+    def request(self, subject, data=None, blk=None, **opts):
+        '''\
         Send a request and have the response delivered to the supplied callback.
 
         Params:
@@ -492,25 +247,88 @@ class NatsClient():
         Returns:
         =====
         sid: Subject Identifier
-        """
-        if not self.connected : raise NatsClientException("Connection losted")
-        if not subject: return None
-        inbox = self._create_inbox()
+        '''
+        if not self.conn.connected: 
+            raise NatsClientException("Connection losted")
+        if not subject: 
+            return None
+        inbox = Common.create_inbox()
         def process_reply(msg, reply):
-            args, varargs, keywords, defaults = inspect.getargspec(cb)
+            'closure block of request'
+            args, _, _, _ = inspect.getargspec(blk)
             args_len = len(args)
             if args_len == 0: 
-                cb()
+                blk()
             elif args_len == 1:
-                cb(msg)
+                blk(msg)
             else:
-                cb(msg, reply)
+                blk(msg, reply)
 
-        s = self.subscribe(inbox, opts, process_reply)
+        sid = self.subscribe(inbox, process_reply, **opts)
         self.publish(subject, data, inbox)
-        return s
+        return sid
+
+    def process_data(self, data):
+        "process data received from nats server, disptch data to proper handles"
+
+        if not data: 
+            return
+        if not self.buf:
+            self.buf = data
+        else:
+            self.buf += data
+        print "received {}".format(data)
+
+        assert_protocol_type = Protocol.assert_protocol_type
+        not_matched = Protocol.not_matched
+        matched = Protocol.matched
+
+        while self.buf:
+            print "buf.{}".format(self.buf)
+            if self.parse_state == Common.AWAITING_CONTROL_LINE:
+                if assert_protocol_type(self.buf, 'msg'):
+                    print "matched message"
+                    sub, sid, _, reply, needed = matched('msg', self.buf)
+                    self.buf = not_matched('msg', self.buf)
+                    sid = int(sid)
+                    needed = int(needed)                     
+                    self.parse_state = Common.AWAITING_MSG_PAYLOAD
+                elif assert_protocol_type(self.buf, 'ok'): 
+                    self.buf = not_matched('ok', self.buf)
+                    print "parseed ok"
+                elif assert_protocol_type(self.buf, 'err'):
+                    self.buf = not_matched('err', self.buf)
+                    print "Nats server error."  
+                elif assert_protocol_type(self.buf, 'ping'):
+                    self.ping_timer.on_ping_request()
+                    self.buf = not_matched('ping', self.buf)
+                elif assert_protocol_type(self.buf, 'pong'):
+                    self.buf = not_matched('pong', self.buf)
+                    self.ping_timer.on_pong_response()
+                elif assert_protocol_type(self.buf, 'info'):
+                    self._process_info(matched('info', self.buf))
+                    self.buf = not_matched('info', self.buf)
+                elif assert_protocol_type(self.buf, 'unknown'):
+                    self.buf = not_matched('ok', self.buf)
+                    raise NatsException("Unknown protocol")
+                else:
+                    return None
+                if self.buf and len(self.buf) == 0: 
+                    self.buf = None
+            if self.parse_state == Common.AWAITING_MSG_PAYLOAD:
+                if not (needed and 
+                    len(self.buf) >= (needed + Protocol.CR_LF_SIZE)): 
+                    return None 
+                self._on_messsage(sub, sid, self.buf[0 : needed], reply)
+                cr_lf_size = Protocol.CR_LF_SIZE
+
+                self.buf = self.buf[(needed + cr_lf_size) : len(self.buf)]
+                sub = sid = reply = needed = None
+                self.parse_state = Common.AWAITING_CONTROL_LINE
+                if self.buf and len(self.buf) == 0: 
+                    self.buf = None
 
     def __str__(self):
-        return "python-nats-{}".format(VERSION)
+        return "python-nats-{}".format(Common.VERSION)
 
 
