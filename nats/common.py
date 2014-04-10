@@ -75,6 +75,5 @@ class Common(object):
         =====
         inbox name;
         '''
-        inbox = ''.join(map(lambda xx:(hex(ord(xx))[2:]), os.urandom(16)))
+        inbox = ''.join([hex(ord(i))[2:] for i in os.urandom(16)])
         return "_INBOX." + inbox
-

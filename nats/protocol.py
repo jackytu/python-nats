@@ -12,13 +12,13 @@ class Protocol(object):
     PROTOCOL_VERSION = '0.5.0.beta.12'
     
     PROTOCOL_TABLE = {
-            "msg" : r"\AMSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n",
-            "ok" : r"\A\+OK\s*\r\n",
-            "err" : r"\A-ERR\s+('.+')?\r\n",
-            "ping" : r"\APING\s*\r\n",
-            "pong" : r"\APONG\s*\r\n",
-            "info" : r"\AINFO\s+([^\r\n]+)\r\n",
-            "unknown" : r"\A(.*)\r\n"
+        "msg" : r"\AMSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\r\n",
+        "ok" : r"\A\+OK\s*\r\n",
+        "err" : r"\A-ERR\s+('.+')?\r\n",
+        "ping" : r"\APING\s*\r\n",
+        "pong" : r"\APONG\s*\r\n",
+        "info" : r"\AINFO\s+([^\r\n]+)\r\n",
+        "unknown" : r"\A(.*)\r\n"
      }    
  
     @classmethod

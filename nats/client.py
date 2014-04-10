@@ -1,20 +1,18 @@
 # -*- coding: iso-8859-1 -*-
-import os, sys
-import json, urllib, random
-import inspect, time, weakref
-import threading, gevent, urlparse
-from gevent.socket import ( 
-                         socket, wait_read)
-
-from const import *
-from error import *
+'''
+Nats client
+'''
+import json
+import inspect
 from nats.stat import Stat
 from nats.common import Common
 from nats.heartbeat import Heartbeat
 from nats.connector import Connector
 from nats.protocol import Protocol
 from threading import Timer
-from gevent.queue import  Queue
+from nats.error import (
+    NatsException,
+    NatsClientException)
 
 class NatsClient(object):
     'nats client'
@@ -25,10 +23,7 @@ class NatsClient(object):
         self.parse_state = Common.AWAITING_CONTROL_LINE
         self.stat = Stat()
         self.conn = Connector(callback=self.process_data, **argvs)
-
-        print self.conn
         self.ping_timer = Heartbeat(self.conn)
-
         print self.__str__()  
 
     def start(self):
@@ -55,11 +50,9 @@ class NatsClient(object):
         self.stat.msgs_received += 1
         if msg: 
             self.stat.bytes_received += len(msg)
-
         if sid not in self.subs: 
             return
         sub = self.subs[sid]
-
         #unsubscribe subscriber if received enough messages; 
         sub["received"] += 1
         if "max" in sub:  
@@ -67,9 +60,7 @@ class NatsClient(object):
                 return self.unsubscribe(sid) 
             if sub["received"] == sub["max"]: 
                 del self.subs[sid]
-
         callback = sub["callback"]
-
         if callback:
             args, _, _, _ = inspect.getargspec(callback)
             args_len = len(args)
@@ -81,7 +72,6 @@ class NatsClient(object):
                 callback(msg, reply)
             else:
                 callback.call(msg, reply, subject)
-
         # cancel autounscribe timer, if subscriber request with timeout, 
         # and receive enough messages;
         if "timeout" in sub  \
@@ -89,7 +79,6 @@ class NatsClient(object):
                     and sub["received"] >= sub["expected"]:
             sub["timeout"].cancel()
             sub["timeout"] = None
-
         self.subs[sid] = sub
 
     def _process_info(self, info):
@@ -125,10 +114,8 @@ class NatsClient(object):
         if not subject: 
             return None
         msg = str(msg)
-
         self.stat.msgs_sent += 1
         self.stat.bytes_sent += len(msg)
-
         self.conn.send_command("PUB {} {} {}{}{}{}".format(subject, 
             opt_reply, len(msg), Protocol.CR_LF, msg, Protocol.CR_LF))
         if blk: 
@@ -152,9 +139,6 @@ class NatsClient(object):
         sid: Subject Identifier
         Returns subscription id which can be passed to #unsubscribe.
         '''
-
-        print self.conn.connected
-
         if not self.conn.connected: 
             raise NatsClientException("Connection losted")
         if not subject: 
@@ -215,20 +199,16 @@ class NatsClient(object):
             return None
         sub = self.subs[sid]
         auto_unsubscribe, expected = True, 1
-
         if  "auto_unsubscribe" in opts:
             auto_unsubscribe = opts["auto_unsubscribe"]
-
         if "expected" in opts:
             expected = opts["expected"]
-
         def pblock():
             'closure block for timeout request'
             if auto_unsubscribe: 
                 self.unsubscribe(sid)
             if callback: 
                 callback(sid)
-
         sub["timeout"] = Timer(timeout, pblock)
         sub["timeout"].start()
         sub["expected"] = expected
@@ -263,7 +243,6 @@ class NatsClient(object):
                 blk(msg)
             else:
                 blk(msg, reply)
-
         sid = self.subscribe(inbox, process_reply, **opts)
         self.publish(subject, data, inbox)
         return sid
@@ -277,12 +256,9 @@ class NatsClient(object):
             self.buf = data
         else:
             self.buf += data
-        print "received {}".format(data)
-
         assert_protocol_type = Protocol.assert_protocol_type
         not_matched = Protocol.not_matched
         matched = Protocol.matched
-
         while self.buf:
             print "buf.{}".format(self.buf)
             if self.parse_state == Common.AWAITING_CONTROL_LINE:
@@ -321,7 +297,6 @@ class NatsClient(object):
                     return None 
                 self._on_messsage(sub, sid, self.buf[0 : needed], reply)
                 cr_lf_size = Protocol.CR_LF_SIZE
-
                 self.buf = self.buf[(needed + cr_lf_size) : len(self.buf)]
                 sub = sid = reply = needed = None
                 self.parse_state = Common.AWAITING_CONTROL_LINE
@@ -330,5 +305,3 @@ class NatsClient(object):
 
     def __str__(self):
         return "python-nats-{}".format(Common.VERSION)
-
-

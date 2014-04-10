@@ -52,12 +52,12 @@ class Connector(object):
         '''
         try:
             self.sock.settimeout(3)
-            client = self.sock.connect((self.host, self.port))
+            self.sock.connect((self.host, self.port))
             self._on_connected()
-            return self.sock, None
+            #return self.sock, None
         except Exception, err:
             print err.message
-            return None, "{}".format(err.message)
+            #return None, "{}".format(err.message)
 
     def flush_pending(self):
         "flush pending data of current connection."

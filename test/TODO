@@ -1,0 +1,8 @@
+[v] subscribe message
+[v] publish message
+[v] request message
+[x] client reconnect
+[x] nats cluster support
+[x] slow consumer
+[x] fast producer
+[x] avoid unknown protocol
