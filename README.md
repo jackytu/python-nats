@@ -12,6 +12,9 @@ git clone https://github.com/jackytu/python-nats
 cd python-nats
 python setup install
 
+# Pip
+pip install python-nats --pre
+
 ```
 
 ## Basic Usage
