@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = "python-nats",
-    version = "0.1.0.beta.1",
+    version = "0.1.0.beta.2",
     packages = find_packages(),
 
     description = "python client for nats message bus",
@@ -15,6 +15,6 @@ setup(
     license = "MIT",
     keywords = ("python", "nats"),
     platforms = "Independant",
-    url = "https://github.com/jackytu/python-nats", 
+    url = "https://github.com/jackytu/python-nats",
 )
 
