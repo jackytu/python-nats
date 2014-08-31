@@ -44,12 +44,12 @@ class Heartbeat(object):
     def on_pong_response(self):
         'handler when pong response received'
         blk = self.pongs.get()
-        if blk: 
+        if blk:
             blk()
 
     def queue_server_rt(self, blk):
         'queue server response'
-        if not blk: 
+        if not blk:
             return None
         self.pongs.put(blk)
         self.conn.send_command(Protocol.ping_request())
@@ -62,14 +62,14 @@ class Heartbeat(object):
 
     def periodic_ping_timer(self):
         'periodically send ping request to nats server'
-        while self.conn.connected:
+        while True:
             self.send_ping()
             time.sleep(Common.DEFAULT_PING_INTERVAL)
 
     def start(self):
         'start ping timer'
         self.worker.start()
-        
+
     def process_pong(self):
         "process pong response from nats server"
         self.pongs_received += 1

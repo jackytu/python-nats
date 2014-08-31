@@ -14,6 +14,7 @@ Attributes;
 from nats.error import NatsConnectException
 from nats.common import Common
 from gevent.socket import (socket, wait_read)
+from gevent.socket import error as socket_error
 import threading
 
 class Connector(object):
@@ -66,6 +67,8 @@ class Connector(object):
             self.sock.connect((self.host, self.port))
             self._on_connected()
             #return self.sock, None
+        except socket_error, err:
+            print "socket error"
         except Exception, err:
             print err.message
             #return None, "{}".format(err.message)
@@ -78,13 +81,16 @@ class Connector(object):
         try:
             self.sock.sendall("".join(self.pending))
             self.pending = None
+        except socket_error, err:
+            self._on_connection_lost(err.message)
         except Exception, err:
             self._on_connection_lost(err.message)
 
     def close(self):
         'close the connection'
-        self.sock.close()
-        self.connected = False
+        #self.sock.close()
+        #self.connected = False
+        self._on_connection_lost("user stop.")
 
     def wait_data(self):
         'wait data from server'
@@ -98,6 +104,8 @@ class Connector(object):
             try:
                 wait_read(self.sock.fileno())
                 data = self.sock.recv(1024)
+            except socket_error, ex:
+                self._on_connection_lost(ex.message)
             except Exception, err:
                 self._on_connection_lost(err.message)
                 return
@@ -120,14 +128,15 @@ class Connector(object):
         2. cancel ping timer; (@2014-04-06)
         '''
         self.connected = False
-        self.sock.close()
-        if self.data_recv:
-            self.data_recv.join(1)
-        #if self.ping_timer:
-        #    self.ping_timer.cancel()
-        if reason:
-            raise NatsConnectException(
-                "Connection closed since {}.".format(reason))
+        self.sock.shutdown(1)
+        try:
+            if self.data_recv:
+                self.data_recv.join(1)
+            if reason:
+                raise NatsConnectException(
+                    "Connection closed since {}.".format(reason))
+        except NatsConnectException, ex:
+            print ex.message
 
     def get_connection_options(self):
         'get the connection options'

@@ -41,7 +41,7 @@ class NatsClient(object):
     def stop(self):
         'stop the nats client, close the connection, and cancel ping timer;'
         self.conn.close()
-        self.ping_timer.cancel()
+        #self.ping_timer.cancel()
 
     def _on_messsage(self, subject, sid, msg, reply=None):
         '''\
