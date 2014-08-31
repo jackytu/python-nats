@@ -10,6 +10,7 @@ atributes:
 
 '''
 import json
+import sys
 import inspect
 from nats.stat import Stat
 from nats.common import Common
@@ -40,8 +41,13 @@ class NatsClient(object):
 
     def stop(self):
         'stop the nats client, close the connection, and cancel ping timer;'
-        self.conn.close()
-        #self.ping_timer.cancel()
+        #self.conn.close()
+        try:
+           self.conn.close()
+           self.ping_timer.cancel()
+        except Exception, ex:
+           print 'error exit 1'
+           sys.exit(1)
 
     def _on_messsage(self, subject, sid, msg, reply=None):
         '''\

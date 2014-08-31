@@ -66,17 +66,15 @@ class Connector(object):
             self.sock.settimeout(3)
             self.sock.connect((self.host, self.port))
             self._on_connected()
-            #return self.sock, None
         except socket_error, err:
-            print "socket error"
+            print err.message
         except Exception, err:
             print err.message
-            #return None, "{}".format(err.message)
 
     def flush_pending(self):
         "flush pending data of current connection."
 
-        if not self.pending:
+        if not self.connected or not self.pending:
             return
         try:
             self.sock.sendall("".join(self.pending))
@@ -88,9 +86,9 @@ class Connector(object):
 
     def close(self):
         'close the connection'
-        #self.sock.close()
-        #self.connected = False
-        self._on_connection_lost("user stop.")
+        if self.pending:
+            self.flush_pending()
+        self._on_connection_lost("USER_STOPPED")
 
     def wait_data(self):
         'wait data from server'
@@ -106,8 +104,9 @@ class Connector(object):
                 data = self.sock.recv(1024)
             except socket_error, ex:
                 self._on_connection_lost(ex.message)
-            except Exception, err:
-                self._on_connection_lost(err.message)
+                return
+            except Exception, ex:
+                self._on_connection_lost(ex.message)
                 return
             self.callback(data)
 
@@ -128,11 +127,18 @@ class Connector(object):
         2. cancel ping timer; (@2014-04-06)
         '''
         self.connected = False
-        self.sock.shutdown(1)
         try:
-            if self.data_recv:
-                self.data_recv.join(1)
-            if reason:
+            self.sock.shutdown(1)
+        except socket_error, ex:
+            print ex.message
+            if ex == 'EBADF':
+                pass
+            else:
+                print ex.message
+        try:
+            if reason == 'USER_STOPPED':
+                pass
+            else:
                 raise NatsConnectException(
                     "Connection closed since {}.".format(reason))
         except NatsConnectException, ex:

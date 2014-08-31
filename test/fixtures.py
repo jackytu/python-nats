@@ -40,7 +40,7 @@ class NatsServerHelper(object):
         self.daemon = subprocess.Popen(daemon_args)
         self.work_dir = directory
 
-        log.debug('Started %d' % daemon.pid)
+        log.debug('Started %d' % self.daemon.pid)
         log.debug('Params: %s' % daemon_args)
         time.sleep(2)
 

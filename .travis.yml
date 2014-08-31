@@ -1,0 +1,14 @@
+language: python
+
+python:
+  - 2.7
+
+before_install:
+  - sh buildnats.sh
+
+install:
+  - pip install -r requirement.txt
+
+script:
+  - python -m test.test_unit
+  - python -m test.test_integration

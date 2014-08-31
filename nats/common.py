@@ -1,7 +1,7 @@
 '''\
-Class Common: 
+Class Common:
     - define some constant and methods;
-attributes: 
+attributes:
     - ssid:  subscribe subject id, this class dispatch sid in global;
 
 '''
@@ -40,7 +40,7 @@ class Common(object):
     @classmethod
     def get_ssid(cls):
         'generate the ssid'
-        
+
         cls.ssid += 1
         return cls.ssid
 
@@ -58,24 +58,29 @@ class Common(object):
         user: username to login nats server;
         pswd: password to login nats server;
         host: ip address of nats server;
-        port: port of nats server  
+        port: port of nats server
         '''
 
-        if type(server_addr) is not str: 
+        if type(server_addr) is not str:
             raise NotImplementException
 
         protocol, after_split = urllib.splittype(server_addr)
 
-        if not protocol == "nats": 
+        if not protocol == "nats":
             raise NotImplementException
 
-        auth, after_split = urllib.splituser(after_split)
-        user_raw, pswd = urllib.splitpasswd(auth)
-        user = user_raw.lstrip("/")
-        _, after_split = urllib.splithost(after_split)
-        host, port = urllib.splitport(after_split)
+        auth_len = len(server_addr.split('@'))
+        if auth_len > 1:
+            auth, after_split = urllib.splituser(after_split)
+            user_raw, pswd = urllib.splitpasswd(auth)
+            user = user_raw.lstrip("/")
+            _, after_split = urllib.splithost(after_split)
+            host, port = urllib.splitport(after_split)
+        else:
+            user = pswd = None
+            host, port = urllib.splitport(after_split)
         return user, pswd, host, int(port)
-        
+
     @classmethod
     def create_inbox(cls):
         '''\

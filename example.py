@@ -1,30 +1,33 @@
 import time
+import sys
+
 from nats.client import NatsClient
 
 NATS_URI = "nats://nats:nats@127.0.0.1:4222"
 
 def main():
-    nats = NatsClient(uris=NATS_URI)
-    nats.start()
-    time.sleep(1)
+    try:
+        nats = NatsClient(uris=NATS_URI)
+        nats.start()
+        time.sleep(1)
 
-    def request_blk(msg, reply):
-        print  "received {}".format(msg)
-        nats.publish(reply, "dispatch some job to publishers!")
+        print nats.stat.query()
 
-    def subscribe_blk(msg):
-        print "received {}".format(msg)
+        def request_blk(msg):
+            print "[SUB]: {}".format(msg)
+            print nats.stat.query()
+            nats.stop()
 
-    def publish_blk():
-        print "callback after published one message"
+        def subscribe_blk(msg, reply):
+            print "[PUB]: {}".format(msg)
+            nats.publish(reply, "I can do this job.")
 
-    sid = nats.subscribe("job", subscribe_blk)
-    nats.publish("job", "I have jobs", "", publish_blk)
-    nats.request("job", "who has jobs", request_blk)
-    print nats.stat.query()
-    time.sleep(1)
-    nats.unsubscribe(sid)
-    nats.stop()
+        sid = nats.subscribe("job", subscribe_blk)
+        nats.request("job", "who can do this job?", request_blk)
+        print nats.stat.query()
+    except KeyboardInterrupt, ex:
+        print "ByeBye."
+        sys.exit(0)
 
 if __name__ == '__main__':
     main()

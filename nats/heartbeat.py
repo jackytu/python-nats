@@ -77,4 +77,4 @@ class Heartbeat(object):
 
     def cancel(self):
         'cancel heartbeat'
-        self.worker.join(1)
+        self.worker.join(3)

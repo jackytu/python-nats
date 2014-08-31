@@ -5,9 +5,12 @@ import tempfile
 import shutil
 
 LIB_PATH = os.path.split(os.getcwd())[0]
+NATS_PATH = '{}/vendor/nats-server/bin'.format(LIB_PATH)
 sys.path.append(LIB_PATH)
+sys.path.append(NATS_PATH)
 
 from mock import MagicMock, patch
+from nats.client import NatsClient
 
 class NatsClientTest(unittest.TestCase):
     @classmethod
@@ -20,8 +23,8 @@ class NatsClientTest(unittest.TestCase):
 
         cls.processHelper.run(proc_args="-c resources/nats_config.yml")
 
-        addr = "nats://nats:nats@127.0.0.1:4222"
-        cls.client = NatsClient().connect_nats({"uri": addr})
+        addr = "nats://127.0.0.1:4222"
+        cls.client = NatsClient(uris=addr)
 
     @classmethod
     def tearDownClass(cls):
@@ -44,12 +47,13 @@ class NatsClientTest(unittest.TestCase):
             if cls._is_exe(exe_file):
                 program_path = exe_file
                 break
+        print program_path
 
         if not program_path:
             #raise Exception("Nats-Server not in path, skip integration test.")
             sys.exit(0)
 
-        return program_path        
+        return program_path
 
 class TestSimple(NatsClientTest):
 
