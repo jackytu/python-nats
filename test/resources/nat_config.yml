@@ -1,0 +1,22 @@
+---
+net: 127.0.0.1
+port: 4222
+
+authorization:
+  user: nats
+  password: nats
+  timeout: 5000
+
+# Debug Options
+logtime: true
+debug:   true
+trace:   true
+
+# Protocol/Limits
+max_control_line: 51200
+max_payload:  5120000
+max_pending: 120000
+
+# EM/IO
+no_epoll:  false
+no_kqueue: true

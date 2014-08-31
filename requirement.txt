@@ -1,0 +1,7 @@
+PyYAML==3.10
+Twisted==13.2.0
+gevent==1.0
+greenlet==0.4.2
+mock==1.0.1
+pyOpenSSL==0.13.1
+requests==2.2.1
